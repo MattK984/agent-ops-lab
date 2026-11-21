@@ -1,0 +1,48 @@
+# agent-ops: runtime for LangGraph automations on a small shared VPS.
+#
+# Design rules (see README "Guardrails"):
+#   - own Compose project, network and volumes; nothing shared with other stacks
+#   - no published ports: Postgres is reachable only inside the `agent-ops` network
+#     (or via Tailscale/SSH tunnel for admin work)
+#   - hard memory/CPU limits on every container, so a runaway agent cannot
+#     starve neighbouring workloads on the host
+#   - secrets come from .env (chmod 600, never committed)
+
+name: agent-ops
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-agent_ops}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - agent-ops
+    # No `ports:` on purpose. Admin access: `docker compose exec postgres psql ...`
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    mem_limit: 512m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Agents are added here from cycle 2.1 onward (job-scan first), each with
+  # its own mem_limit/cpus and `depends_on: postgres: condition: service_healthy`.
+
+networks:
+  agent-ops:
+    name: agent-ops
+
+volumes:
+  pgdata:
