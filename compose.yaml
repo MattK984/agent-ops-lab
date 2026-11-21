@@ -12,7 +12,9 @@ name: agent-ops
 
 services:
   postgres:
-    image: postgres:17
+    # pgvector build of Postgres 17: same data format as postgres:17, plus the
+    # `vector` extension used for the CVE triage agent's context memory.
+    image: pgvector/pgvector:pg17
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
@@ -20,6 +22,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-agent_ops}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Schema scripts; run only on an empty volume (see db/init/*.sql header)
+      - ./db/init:/docker-entrypoint-initdb.d:ro
     networks:
       - agent-ops
     # No `ports:` on purpose. Admin access: `docker compose exec postgres psql ...`
@@ -37,7 +41,7 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Agents are added here from cycle 2.1 onward (job-scan first), each with
+  # Agents are added here from cycle 2.1 onward (CVE triage first), each with
   # its own mem_limit/cpus and `depends_on: postgres: condition: service_healthy`.
 
 networks:
