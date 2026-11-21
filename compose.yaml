@@ -14,7 +14,10 @@ services:
   postgres:
     # pgvector build of Postgres 17: same data format as postgres:17, plus the
     # `vector` extension used for the CVE triage agent's context memory.
-    image: pgvector/pgvector:pg17
+    # `-trixie` keeps glibc 2.41, the same as the official postgres:17 image the
+    # data volume was created with; the plain `pg17` tag (bookworm, glibc 2.36)
+    # triggers a collation version mismatch on existing volumes.
+    image: pgvector/pgvector:pg17-trixie
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}

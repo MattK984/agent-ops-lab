@@ -63,7 +63,7 @@ docker compose exec postgres psql -U agent_ops -d agent_ops -c 'select version()
 On a fresh volume the `cve` schema is created automatically. On an existing volume, apply it once:
 
 ```bash
-docker compose exec -T postgres psql -U agent_ops -d agent_ops < db/init/001_cve_memory.sql
+docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < db/init/001_cve_memory.sql
 ```
 
 ## Roadmap
