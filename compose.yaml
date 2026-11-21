@@ -41,8 +41,37 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Agents are added here from cycle 2.1 onward (CVE triage first), each with
-  # its own mem_limit/cpus and `depends_on: postgres: condition: service_healthy`.
+  # CVE triage agent (automation #1). A batch job, not a daemon: the `jobs`
+  # profile keeps it out of `docker compose up -d`; run it with
+  #   docker compose run --rm cve-triage
+  # Q-2.1-03 runs the hello-world graph (image default command).
+  cve-triage:
+    build: ./agents/cve_triage
+    profiles: ["jobs"]
+    # Least privilege: only the variables this agent needs, not the whole .env
+    environment:
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-true}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://eu.api.smith.langchain.com}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-agent-ops-lab}
+      NVD_API_KEY: ${NVD_API_KEY:-}
+      HELLO_HOURS: ${HELLO_HOURS:-24}
+    networks:
+      - agent-ops
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # From Q-2.1-04 on: DATABASE_URL + depends_on postgres (service_healthy)
 
 networks:
   agent-ops:
