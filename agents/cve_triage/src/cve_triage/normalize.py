@@ -63,6 +63,7 @@ class Configuration:
 class NormalizedCve:
     cve_id: str
     status: str
+    source: str | None
     published: str | None
     last_modified: str | None
     description: str
@@ -167,6 +168,7 @@ def normalize(cve: dict[str, Any]) -> NormalizedCve:
     return NormalizedCve(
         cve_id=cve["id"],
         status=cve.get("vulnStatus", ""),
+        source=cve.get("sourceIdentifier"),
         published=cve.get("published"),
         last_modified=cve.get("lastModified"),
         description=_description(cve),

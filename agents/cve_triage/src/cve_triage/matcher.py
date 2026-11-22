@@ -12,6 +12,7 @@ needs_review is used, never a guess, when:
   - the criterion has no version (`-`, "not applicable"), as in older Microsoft records
   - a running-on condition (vulnerable=false platform CPE) names a product the host inventory does not list
   - NVD has not analysed the CVE yet (no configurations) but the description names an inventory product
+    and, where the inventory lists `cna_sources`, the CVE was filed by one of them
 
 Logic inside a configuration is three-valued (true / unknown / false, Kleene):
 OR takes the best value, AND the worst, NOT swaps true and false and keeps unknown.
@@ -133,6 +134,13 @@ def _not(v: Tri) -> Tri:
 class Software:
     cpe: Cpe
     keywords: list[str]
+    cna_sources: list[str] = field(default_factory=list)  # empty = no source restriction
+
+    def names_in(self, text: str, source: str | None) -> list[str]:
+        """Keywords found in `text`, or [] if the filing source is not one of cna_sources."""
+        if self.cna_sources and (source or "").lower() not in self.cna_sources:
+            return []
+        return [kw for kw in self.keywords if _mentions(text, kw)]
 
 
 @dataclass
@@ -155,7 +163,11 @@ class Inventory:
             for s in h.get("software", []):
                 cpe = parse_cpe(s["cpe"])
                 default_kw = cpe.product.replace("_", " ")
-                sw.append(Software(cpe, [k.lower() for k in s.get("keywords") or [default_kw]]))
+                sw.append(Software(
+                    cpe,
+                    [k.lower() for k in s.get("keywords") or [default_kw]],
+                    [c.lower() for c in s.get("cna_sources") or []],
+                ))
             meta = {k: v for k, v in h.items() if k not in ("id", "software")}
             hosts.append(Host(h["id"], sw, meta))
         return cls(hosts)
@@ -183,7 +195,8 @@ class Inventory:
         if has_config:
             return False
         text = " ".join(d.get("value", "") for d in raw.get("descriptions", [])).lower()
-        return any(_mentions(text, kw) for h in self.hosts for s in h.software for kw in s.keywords)
+        source = raw.get("sourceIdentifier")
+        return any(s.names_in(text, source) for h in self.hosts for s in h.software)
 
 
 def _mentions(text: str, keyword: str) -> bool:
@@ -298,12 +311,14 @@ def match_cve(cve: NormalizedCve, inventory: Inventory) -> list[MatchResult]:
         text = cve.description.lower()
         for host in inventory.hosts:
             for sw in host.software:
-                hits = [kw for kw in sw.keywords if _mentions(text, kw)]
+                hits = sw.names_in(text, cve.source)
                 if hits:
                     results.append(MatchResult(cve.cve_id, host.id, sw.cpe.raw, NEEDS_REVIEW, {
                         "reason": f"no CPE configuration yet (vulnStatus={cve.status or 'unknown'}); "
-                                  "product named in description",
+                                  "product named in description"
+                                  + (" by its own CNA" if sw.cna_sources else ""),
                         "keywords": hits,
+                        "source": cve.source,
                     }))
         return results
 

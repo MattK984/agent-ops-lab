@@ -58,6 +58,10 @@ def test_every_inventory_cpe_parses(inv):
     (fx.VCENTER_U1, {("virt-vc-01", "vcenter_server"): "affected"}),
     (fx.VCENTER_U2, {("virt-vc-01", "vcenter_server"): "not_affected"}),
     (fx.UNRELATED_PENDING, {}),
+    (fx.PG_PROJECT, {("db-core-01", "postgresql"): "needs_review"}),
+    (fx.HMAILSERVER, {}),
+    (fx.GOLANG_OPENSSL, {}),
+    (fx.OPENSSH_ANY_SOURCE, {("pay-gw-01", "openssh"): "needs_review"}),
 ])
 def test_match(rec, expected, inv):
     assert results(rec, inv) == expected
@@ -73,3 +77,19 @@ def test_evidence_explains_decision(inv):
 def test_prefilter(inv):
     keep = {r["id"] for r in fx.ALL if inv.is_candidate(r)}
     assert keep == {r["id"] for r in fx.ALL} - {"CVE-2026-1011", "CVE-2026-1012", "CVE-2026-1015"}
+
+
+def test_cna_sources_loaded(inv):
+    sw = {s.cpe.product: s for h in inv.hosts for s in h.software}
+    assert sw["postgresql"].cna_sources == ["f86ef6dc-4d3a-42ad-8f28-e6d5547a5007"]
+    assert sw["big-ip_local_traffic_manager"].keywords == ["big-ip"]
+    assert sw["openssh"].cna_sources == []
+
+
+def test_wrong_source_is_not_a_candidate(inv):
+    assert inv.is_candidate(fx.PG_PROJECT)
+    assert not inv.is_candidate(fx.HMAILSERVER)
+    assert not inv.is_candidate(fx.GOLANG_OPENSSL)
+    [r] = match_cve(normalize(fx.PG_PROJECT), inv)
+    assert r.detail["source"] == "f86ef6dc-4d3a-42ad-8f28-e6d5547a5007"
+    assert "by its own CNA" in r.detail["reason"]

@@ -62,3 +62,13 @@ def test_failure_is_recorded(inv):
     assert "NVD down" in store.runs[1]["error"]
     # a failed run does not move the window forward
     assert store.last_ok_window_end() is None
+
+
+def test_window_override_replays_fixed_window(inv):
+    store, seen = MemoryStore(), []
+    triage.run(store, inv, pages([]), now=NOW)          # a normal run exists
+    triage.run(store, inv, pages([], seen=seen), now=NOW + timedelta(days=1),
+               start_override="2026-11-15T11:28:28", end_override="2026-11-22T11:28:28+00:00")
+    assert seen == [(datetime(2026, 11, 15, 11, 28, 28, tzinfo=UTC), datetime(2026, 11, 22, 11, 28, 28, tzinfo=UTC))]
+    with pytest.raises(ValueError):
+        triage.compute_window(store, start_override="2026-11-22T00:00:00", end_override="2026-11-21T00:00:00")

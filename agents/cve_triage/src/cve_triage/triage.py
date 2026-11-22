@@ -5,6 +5,8 @@
 
 - Window: lastModified since the end of the last successful run (minus a small
   overlap for NVD indexing lag); first run: TRIAGE_BACKFILL_DAYS (default 7).
+  TRIAGE_WINDOW_START / TRIAGE_WINDOW_END (ISO-8601, UTC if no offset) replay
+  a fixed window instead, e.g. to compare matcher versions on the same data.
 - fetch_nvd pages through NVD and keeps only records that could concern an
   inventory product, so a large window never sits in memory or in the trace.
 - Only CVEs with at least one match row are stored in cve.cves.
@@ -49,10 +51,22 @@ class State(TypedDict, total=False):
     summary: dict[str, Any]
 
 
-def compute_window(store: Store, now: datetime | None = None, backfill_days: int = 7) -> tuple[datetime, datetime]:
-    end = (now or datetime.now(UTC)).replace(microsecond=0)
-    last = store.last_ok_window_end()
-    start = (last - OVERLAP) if last else end - timedelta(days=backfill_days)
+def _parse_ts(value: str) -> datetime:
+    ts = datetime.fromisoformat(value)
+    return ts if ts.tzinfo else ts.replace(tzinfo=UTC)
+
+
+def compute_window(store: Store, now: datetime | None = None, backfill_days: int = 7,
+                   start_override: str | None = None,
+                   end_override: str | None = None) -> tuple[datetime, datetime]:
+    end = _parse_ts(end_override) if end_override else (now or datetime.now(UTC)).replace(microsecond=0)
+    if start_override:
+        start = _parse_ts(start_override)
+    else:
+        last = store.last_ok_window_end()
+        start = (last - OVERLAP) if last else end - timedelta(days=backfill_days)
+    if start >= end:
+        raise ValueError(f"empty window: {start.isoformat()} >= {end.isoformat()}")
     return start.astimezone(UTC), end.astimezone(UTC)
 
 
@@ -124,9 +138,10 @@ def build_graph(store: Store, inventory: Inventory, fetch_pages: PageFetcher = n
 
 
 def run(store: Store, inventory: Inventory, fetch_pages: PageFetcher = nvd.iter_modified,
-        *, now: datetime | None = None, backfill_days: int = 7) -> dict[str, Any]:
+        *, now: datetime | None = None, backfill_days: int = 7,
+        start_override: str | None = None, end_override: str | None = None) -> dict[str, Any]:
     """One full run with bookkeeping in cve.runs. Returns the summary."""
-    start, end = compute_window(store, now, backfill_days)
+    start, end = compute_window(store, now, backfill_days, start_override, end_override)
     run_id = store.start_run(start, end)
     trace_id = str(uuid.uuid4())
     try:
@@ -153,7 +168,9 @@ def main() -> None:
     inventory = Inventory.load(os.getenv("CVE_INVENTORY") or DEFAULT_INVENTORY)
     store = PostgresStore()
     try:
-        summary = run(store, inventory, backfill_days=int(os.getenv("TRIAGE_BACKFILL_DAYS", "7")))
+        summary = run(store, inventory, backfill_days=int(os.getenv("TRIAGE_BACKFILL_DAYS", "7")),
+                      start_override=os.getenv("TRIAGE_WINDOW_START") or None,
+                      end_override=os.getenv("TRIAGE_WINDOW_END") or None)
     finally:
         store.close()
         try:

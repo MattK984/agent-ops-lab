@@ -64,6 +64,9 @@ services:
       NVD_API_KEY: ${NVD_API_KEY:-}
       HELLO_HOURS: ${HELLO_HOURS:-24}
       TRIAGE_BACKFILL_DAYS: ${TRIAGE_BACKFILL_DAYS:-7}
+      # Replay a fixed window (ISO-8601); normally unset: `-e TRIAGE_WINDOW_START=... -e TRIAGE_WINDOW_END=...`
+      TRIAGE_WINDOW_START: ${TRIAGE_WINDOW_START:-}
+      TRIAGE_WINDOW_END: ${TRIAGE_WINDOW_END:-}
       CVE_INVENTORY: /app/inventory/bank-estate.yaml
       # libpq variables: no connection URL, so special characters in the password are safe
       PGHOST: postgres

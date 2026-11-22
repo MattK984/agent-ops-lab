@@ -15,9 +15,11 @@ def m(criteria, vulnerable=True, **rng):
     return out
 
 
-def cve(cve_id, *configs, status="Analyzed", desc="Test vulnerability.", score=9.8, kev=None, metrics=None):
+def cve(cve_id, *configs, status="Analyzed", desc="Test vulnerability.", score=9.8, kev=None, metrics=None,
+        source="nvd@nist.gov"):
     rec = {
         "id": cve_id,
+        "sourceIdentifier": source,
         "vulnStatus": status,
         "published": "2026-11-18T10:00:00.000",
         "lastModified": "2026-11-20T10:00:00.000",
@@ -78,7 +80,8 @@ WINDOWS_RANGE = cve("CVE-2026-1008", conf(node(
 WINDOWS_PATCHED = cve("CVE-2026-1009", conf(node(
     m("cpe:2.3:o:microsoft:windows_server_2019:*:*:*:*:*:*:x64:*", ee="10.0.17763.5000"),
 )), score=8.1)
-KERNEL_PENDING = cve("CVE-2026-1010", status="Awaiting Analysis", metrics={},
+KERNEL_ORG = "416baaa9-dc9f-4396-8d5f-8c081fb06d67"
+KERNEL_PENDING = cve("CVE-2026-1010", status="Awaiting Analysis", metrics={}, source=KERNEL_ORG,
                      desc="In the Linux kernel, the following vulnerability has been resolved: net: fix UAF.")
 REJECTED = cve("CVE-2026-1011", conf(node(m("cpe:2.3:a:apache:tomcat:*:*:*:*:*:*:*:*"))), status="Rejected")
 UNRELATED = cve("CVE-2026-1012", conf(node(m("cpe:2.3:a:example:widget:1.0:*:*:*:*:*:*:*"))))
@@ -91,6 +94,17 @@ VCENTER_U2 = cve("CVE-2026-1014", conf(node(
 )))
 UNRELATED_PENDING = cve("CVE-2026-1015", status="Received", metrics={},
                         desc="A flaw in Example Widget allows remote code execution.")
+
+# Unanalysed CVEs that name an inventory product: only the vendor's own CNA counts
+PG_PROJECT = cve("CVE-2026-1016", status="Awaiting Analysis", metrics={},
+                 source="f86ef6dc-4d3a-42ad-8f28-e6d5547a5007",
+                 desc="Use after free in PostgreSQL COPY FROM error reporting allows memory disclosure.")
+HMAILSERVER = cve("CVE-2026-1017", status="Deferred", metrics={}, source="disclosure@vulncheck.com",
+                  desc="SQL injection in hMailServer 6.0.0 through 6.2.18, when the server uses PostgreSQL.")
+GOLANG_OPENSSL = cve("CVE-2026-1018", status="Deferred", metrics={}, source="secalert@redhat.com",
+                     desc="A memory leak in golang-fips/openssl when deriving keys.")
+OPENSSH_ANY_SOURCE = cve("CVE-2026-1019", status="Received", metrics={}, source="cve@mitre.org",
+                         desc="OpenSSH before 9.9 allows a race in sshd.")
 
 ALL = [TOMCAT, OPENSSH_IN_RANGE, OPENSSH_ON_BOUND, FORTIOS_OTHER, FORTIOS_HIT, CONFLUENCE_ON_WINDOWS,
        WINDOWS_NA, WINDOWS_RANGE, WINDOWS_PATCHED, KERNEL_PENDING, REJECTED, UNRELATED, VCENTER_U1,
