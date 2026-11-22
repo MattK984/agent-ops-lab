@@ -15,8 +15,11 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --frozen --no-dev
+# Default inventory baked in; compose.yaml mounts the repo copy over it read-only
+COPY inventory ./inventory
 
 RUN useradd --system --uid 10001 agent
 USER agent
 
-CMD ["python", "-m", "cve_triage.hello_graph"]
+# Checkpoint A of the triage graph. Hello world: `python -m cve_triage.hello_graph`
+CMD ["python", "-m", "cve_triage.triage"]

@@ -46,11 +46,15 @@ services:
 
   # CVE triage agent (automation #1). A batch job, not a daemon: the `jobs`
   # profile keeps it out of `docker compose up -d`; run it with
-  #   docker compose run --rm cve-triage
-  # Q-2.1-03 runs the hello-world graph (image default command).
+  #   docker compose run --rm cve-triage                                   # triage run (checkpoint A)
+  #   docker compose run --rm cve-triage python -m cve_triage.verify_cpes  # inventory CPEs vs NVD dictionary
+  #   docker compose run --rm cve-triage python -m cve_triage.hello_graph  # Q-2.1-03 hello world
   cve-triage:
     build: ./agents/cve_triage
     profiles: ["jobs"]
+    depends_on:
+      postgres:
+        condition: service_healthy
     # Least privilege: only the variables this agent needs, not the whole .env
     environment:
       LANGSMITH_TRACING: ${LANGSMITH_TRACING:-true}
@@ -59,6 +63,17 @@ services:
       LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-agent-ops-lab}
       NVD_API_KEY: ${NVD_API_KEY:-}
       HELLO_HOURS: ${HELLO_HOURS:-24}
+      TRIAGE_BACKFILL_DAYS: ${TRIAGE_BACKFILL_DAYS:-7}
+      CVE_INVENTORY: /app/inventory/bank-estate.yaml
+      # libpq variables: no connection URL, so special characters in the password are safe
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-agent_ops}
+    volumes:
+      # Edit the inventory without rebuilding the image
+      - ./agents/cve_triage/inventory:/app/inventory:ro
     networks:
       - agent-ops
     read_only: true
@@ -74,7 +89,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    # From Q-2.1-04 on: DATABASE_URL + depends_on postgres (service_healthy)
 
 networks:
   agent-ops:

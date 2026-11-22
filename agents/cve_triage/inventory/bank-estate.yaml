@@ -6,6 +6,11 @@
 # zone:        internet | dmz | internal | restricted
 # criticality: critical | high | medium | low
 # data_class:  payment | customer | internal | public
+#
+# software[].keywords (optional): phrases that name the product in CVE
+# descriptions. Used only for CVEs NVD has not analysed yet (no CPE
+# configuration), which the matcher then marks needs_review. Default: the CPE
+# product with underscores as spaces (e.g. "linux kernel").
 
 version: 1
 organisation: Musterbank AG (synthetic)
@@ -31,6 +36,7 @@ hosts:
     owner: network-team
     software:
       - cpe: "cpe:2.3:a:f5:big-ip_local_traffic_manager:16.1.3:*:*:*:*:*:*:*"
+        keywords: ["big-ip"]
     compensating_controls:
       - Management interface only reachable from admin VLAN
     patch_window: monthly, Sunday 02:00–06:00

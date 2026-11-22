@@ -24,12 +24,13 @@ This repo is where I build the patterns that answer those questions, on infrastr
 | `compose.yaml` | The `agent-ops` Compose project: Postgres 17 with pgvector for state, checkpoints, audit log and agent memory; own network and volume; hard memory/CPU limits; no published ports |
 | `.env.example` | Every setting the stack reads. Copy to `.env`, which is never committed |
 | `db/init/001_cve_memory.sql` | Schema `cve`: runs, CVE records, deterministic matches, append-only analyses with embeddings |
-| `agents/cve_triage/` | The agent: Python package (uv), Dockerfile, offline tests. Today: `hello_graph.py` (NVD last 24 h → count, traced) |
+| `agents/cve_triage/` | The agent: Python package (uv), Dockerfile, tests. Today: checkpoint A, the deterministic half (NVD → normalise → CPE/version match → Postgres), traced; `hello_graph.py` from Q-2.1-03 |
 | `agents/cve_triage/inventory/bank-estate.yaml` | Synthetic IT estate of a fictional bank (8 hosts with CPEs, zones, criticality, compensating controls) |
 | `docs/cve-triage/product-brief.md` | User, problem, graph design, priority rules, guardrails, metrics, out of scope |
 | `docs/cve-triage/setup.md` | Runbook: keys, pgvector switch, schema, first traced run on the VPS |
+| `docs/cve-triage/checkpoint-a.md` | Runbook + design notes for the deterministic matcher: CPE check, first runs, hand-check |
 
-Coming next: the full triage graph in `agents/cve_triage/`, `evals/`.
+Coming next: LLM assessment, guard, pgvector recall and the digest (checkpoint B), then `evals/`.
 
 ## Automation #1: CVE triage agent
 
