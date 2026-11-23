@@ -148,6 +148,20 @@ def test_guard_corrects_and_rejects_inside_the_graph(inv):
     assert s["guard"] == {"corrected": 1, "passed": 2, "rejected": 2}
 
 
+def test_failed_model_calls_are_retried_when_the_pair_reappears(inv):
+    store = MemoryStore()
+    quota = FakeAssessor(lambda c: Outcome(None, "OpenAIRateLimitError: 429 no credits"))
+    go(store, inv, fx.ALL, quota)
+    assert all(a["guard_result"] == "rejected" for a in store.analyses)
+    ok = FakeAssessor()
+    s = go(store, inv, fx.ALL, ok, now=NOW + timedelta(days=1),
+           start_override="2026-11-16T06:00:00", end_override="2026-11-23T06:00:00")
+    assert s["assessment"]["llm"] == 5 and s["assessment"]["unchanged"] == 0
+    s = go(store, inv, fx.ALL, ok, now=NOW + timedelta(days=2),
+           start_override="2026-11-16T06:00:00", end_override="2026-11-23T06:00:00")
+    assert s["assessment"]["unchanged"] == 5
+
+
 def test_without_a_model_everything_is_rule_floor_and_flagged(inv):
     store = MemoryStore()
     s = go(store, inv, fx.ALL, assessor=None)

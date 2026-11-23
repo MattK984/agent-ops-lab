@@ -143,13 +143,19 @@ class PostgresStore:
             )
 
     def latest_fingerprints(self, keys):
-        """Fingerprint of the newest analysis per (cve_id, host_id)."""
+        """Fingerprint of the newest analysis per (cve_id, host_id).
+
+        If that analysis failed at the model (API error, quota, timeout), the fingerprint is
+        marked deferred so the pair is assessed again the next time it appears."""
         if not keys:
             return {}
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT DISTINCT ON (a.cve_id, a.host_id) a.cve_id, a.host_id, a.evidence->'fingerprint'
+                SELECT DISTINCT ON (a.cve_id, a.host_id) a.cve_id, a.host_id,
+                       CASE WHEN a.evidence->>'model_error' IS NOT NULL   -- model call failed: retry later
+                            THEN a.evidence->'fingerprint' || '{"deferred": true}'::jsonb
+                            ELSE a.evidence->'fingerprint' END
                 FROM cve.analyses a
                 JOIN unnest(%s::text[], %s::text[]) AS k(cve_id, host_id)
                   ON a.cve_id = k.cve_id AND a.host_id = k.host_id
@@ -235,7 +241,8 @@ class MemoryStore:
         for a in self.analyses:  # insertion order = time order
             k = (a["cve_id"], a["host_id"])
             if k in wanted:
-                out[k] = a["evidence"]["fingerprint"]
+                fp = a["evidence"]["fingerprint"]
+                out[k] = {**fp, "deferred": True} if a["evidence"].get("model_error") else fp
         return out
 
     def recall(self, embedding, k, exclude_run_id):

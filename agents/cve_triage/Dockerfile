@@ -17,7 +17,7 @@ COPY src ./src
 RUN uv sync --frozen --no-dev
 # Bake the local embedding model into the image: the container runs read-only and offline for it
 ENV FASTEMBED_CACHE_PATH=/app/models
-RUN python -m cve_triage.memory
+RUN python -m cve_triage.memory && chmod -R a+rX /app/models
 ENV HF_HUB_OFFLINE=1 \
     HF_HOME=/tmp/hf
 # Default inventory baked in; compose.yaml mounts the repo copy over it read-only
