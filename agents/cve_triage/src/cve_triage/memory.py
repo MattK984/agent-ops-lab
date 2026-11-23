@@ -15,6 +15,11 @@ from cve_triage.assess import Candidate
 Embedder = Callable[[list[str]], list[list[float]]]
 DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
 DIMENSIONS = 384
+# Memory: ONNX attention grows with batch x tokens^2. 32 texts x ~512 tokens pinned the
+# 768m container on the 7-day replay (2026-11-23). ~900 chars is ~200-250 tokens, which keeps
+# product, host context, CWE and the first sentences of the description; batch 4 keeps the peak small.
+MAX_CHARS = 900
+BATCH_SIZE = 4
 
 
 def case_text(c: Candidate) -> str:
@@ -22,7 +27,7 @@ def case_text(c: Candidate) -> str:
     h = c.host
     return (f"{', '.join(c.products)} on {h.get('role')} (zone {h.get('zone')}, "
             f"criticality {h.get('criticality')}, data {h.get('data_class')}). "
-            f"CWE: {', '.join(c.cve.get('cwe') or []) or 'n/a'}. {c.cve.get('description') or ''}")[:2000]
+            f"CWE: {', '.join(c.cve.get('cwe') or []) or 'n/a'}. {c.cve.get('description') or ''}")[:MAX_CHARS]
 
 
 class FastEmbedder:
@@ -35,7 +40,7 @@ class FastEmbedder:
                                     cache_dir=os.getenv("FASTEMBED_CACHE_PATH") or None)
 
     def __call__(self, texts: list[str]) -> list[list[float]]:
-        vectors = [v.tolist() for v in self._model.embed(texts, batch_size=32)]
+        vectors = [v.tolist() for v in self._model.embed(texts, batch_size=BATCH_SIZE)]
         if vectors and len(vectors[0]) != DIMENSIONS:
             raise ValueError(f"{self.model_name} returns {len(vectors[0])} dims; cve.analyses expects {DIMENSIONS}")
         return vectors

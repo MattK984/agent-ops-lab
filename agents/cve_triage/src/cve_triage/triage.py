@@ -52,7 +52,8 @@ class State(TypedDict, total=False):
     window_start: str
     window_end: str
     fetched: int
-    candidates: list[dict[str, Any]]   # raw NVD records that passed the pre-filter
+    candidates: list[dict[str, Any]]   # raw NVD records that passed the pre-filter (cleared after persist)
+    candidate_count: int
     normalized: list[NormalizedCve]
     matches: list[MatchResult]
     stored_cves: int
@@ -115,7 +116,7 @@ def build_graph(store: Store, inventory: Inventory, fetch_pages: PageFetcher = n
                                 datetime.fromisoformat(state["window_end"])):
             fetched += len(page)
             keep.extend(r for r in page if inventory.is_candidate(r))
-        return {"fetched": fetched, "candidates": keep}
+        return {"fetched": fetched, "candidates": keep, "candidate_count": len(keep)}
 
     def normalize_node(state: State) -> State:
         return {"normalized": [normalize(r) for r in state["candidates"]]}
@@ -136,6 +137,7 @@ def build_graph(store: Store, inventory: Inventory, fetch_pages: PageFetcher = n
         return {
             "stored_cves": store.save_cves(cves),
             "stored_matches": store.save_matches(state["run_id"], state["matches"]),
+            "candidates": [],   # raw NVD JSON is stored now; drop it from state (memory, trace size)
         }
 
     # ------------------------------------------------------------ checkpoint B
@@ -245,7 +247,7 @@ def build_graph(store: Store, inventory: Inventory, fetch_pages: PageFetcher = n
             "window_start": state["window_start"],
             "window_end": state["window_end"],
             "fetched": state.get("fetched", 0),
-            "candidates": len(state.get("candidates", [])),
+            "candidates": state.get("candidate_count", 0),
             "match_rows": len(matches),
             "by_result": dict(sorted(by_result.items())),
             "by_host": {h: dict(sorted(c.items())) for h, c in sorted(by_host.items())},
