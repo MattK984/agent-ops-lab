@@ -15,11 +15,16 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --frozen --no-dev
+# Bake the local embedding model into the image: the container runs read-only and offline for it
+ENV FASTEMBED_CACHE_PATH=/app/models
+RUN python -m cve_triage.memory
+ENV HF_HUB_OFFLINE=1 \
+    HF_HOME=/tmp/hf
 # Default inventory baked in; compose.yaml mounts the repo copy over it read-only
 COPY inventory ./inventory
 
 RUN useradd --system --uid 10001 agent
 USER agent
 
-# Checkpoint A of the triage graph. Hello world: `python -m cve_triage.hello_graph`
+# Triage graph, checkpoints A + B. Hello world: `python -m cve_triage.hello_graph`
 CMD ["python", "-m", "cve_triage.triage"]

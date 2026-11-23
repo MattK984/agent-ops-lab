@@ -46,7 +46,8 @@ services:
 
   # CVE triage agent (automation #1). A batch job, not a daemon: the `jobs`
   # profile keeps it out of `docker compose up -d`; run it with
-  #   docker compose run --rm cve-triage                                   # triage run (checkpoint A)
+  #   docker compose run --rm cve-triage                                   # triage run (checkpoints A + B)
+  #   docker compose run --rm -e TRIAGE_LLM=off cve-triage                 # rule-only run, no model calls
   #   docker compose run --rm cve-triage python -m cve_triage.verify_cpes  # inventory CPEs vs NVD dictionary
   #   docker compose run --rm cve-triage python -m cve_triage.hello_graph  # Q-2.1-03 hello world
   cve-triage:
@@ -62,17 +63,35 @@ services:
       LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://eu.api.smith.langchain.com}
       LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-agent-ops-lab}
       NVD_API_KEY: ${NVD_API_KEY:-}
+      # Checkpoint B: assessment (see agents/cve_triage/src/cve_triage/assess.py)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      TRIAGE_LLM: ${TRIAGE_LLM:-on}
+      # anthropic (default model claude-haiku-5-5) | openai (default model gpt-6-luna)
+      TRIAGE_LLM_PROVIDER: ${TRIAGE_LLM_PROVIDER:-anthropic}
+      # empty = the provider's default model
+      TRIAGE_LLM_MODEL: ${TRIAGE_LLM_MODEL:-}
+      # openai reasoning models only: none | low (default) | medium | high
+      TRIAGE_LLM_REASONING_EFFORT: ${TRIAGE_LLM_REASONING_EFFORT:-}
+      TRIAGE_LLM_MIN_CVSS: ${TRIAGE_LLM_MIN_CVSS:-7.0}
+      TRIAGE_LLM_CAP: ${TRIAGE_LLM_CAP:-40}
+      TRIAGE_RECALL_K: ${TRIAGE_RECALL_K:-3}
+      TRIAGE_PRICE_IN_PER_MTOK: ${TRIAGE_PRICE_IN_PER_MTOK:-}
+      TRIAGE_PRICE_OUT_PER_MTOK: ${TRIAGE_PRICE_OUT_PER_MTOK:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-small-en-v1.5}
       HELLO_HOURS: ${HELLO_HOURS:-24}
       TRIAGE_BACKFILL_DAYS: ${TRIAGE_BACKFILL_DAYS:-7}
       # Replay a fixed window (ISO-8601); normally unset: `-e TRIAGE_WINDOW_START=... -e TRIAGE_WINDOW_END=...`
       TRIAGE_WINDOW_START: ${TRIAGE_WINDOW_START:-}
       TRIAGE_WINDOW_END: ${TRIAGE_WINDOW_END:-}
       CVE_INVENTORY: /app/inventory/bank-estate.yaml
-      # libpq variables: no connection URL, so special characters in the password are safe
+      # libpq variables: no connection URL, so special characters in the password are safe.
+      # Least privilege: the dedicated role from db/migrations/002_cve_agent_role.sql;
+      # falls back to the owner until CVE_AGENT_USER is set in .env.
       PGHOST: postgres
       PGPORT: "5432"
-      PGUSER: ${POSTGRES_USER}
-      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGUSER: ${CVE_AGENT_USER:-${POSTGRES_USER}}
+      PGPASSWORD: ${CVE_AGENT_PASSWORD:-${POSTGRES_PASSWORD}}
       PGDATABASE: ${POSTGRES_DB:-agent_ops}
     volumes:
       # Edit the inventory without rebuilding the image
@@ -85,7 +104,8 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    mem_limit: 512m
+    # 768m since checkpoint B: local ONNX embedding model (~130 MB) + LangChain
+    mem_limit: 768m
     cpus: 0.5
     logging:
       driver: json-file

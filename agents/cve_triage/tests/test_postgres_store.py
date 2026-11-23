@@ -2,7 +2,8 @@
 
 Skipped unless TEST_DATABASE_URL points at a THROWAWAY database, e.g.
     TEST_DATABASE_URL="host=/tmp/pg port=5433 user=agent_ops dbname=agent_ops" uv run pytest -q
-The test deletes runs/matches/cves it created (analyses are untouched).
+Checkpoint-A tests delete the runs/matches/cves/digests they created; the checkpoint-B test
+runs inside a transaction that is rolled back (analyses are append-only and cannot be deleted).
 """
 
 import os
@@ -30,6 +31,8 @@ def store():
     with s.conn.transaction(), s.conn.cursor() as cur:
         cur.execute("DELETE FROM cve.matches WHERE cve_id LIKE 'CVE-2026-10%'")
         cur.execute("DELETE FROM cve.cves WHERE cve_id LIKE 'CVE-2026-10%'")
+        cur.execute("DELETE FROM cve.digests WHERE run_id IN (SELECT id FROM cve.runs WHERE window_end >= %s)",
+                    (NOW - timedelta(days=1),))
         cur.execute("DELETE FROM cve.runs WHERE window_end >= %s", (NOW - timedelta(days=1),))
     s.close()
 
@@ -80,3 +83,44 @@ def test_failed_run_is_recorded(store):
         status, error = cur.fetchone()
     store.conn.commit()
     assert status == "failed" and "NVD down" in error
+
+
+def test_checkpoint_b_persists_append_only_analyses_and_digest():
+    """Everything inside one transaction that is rolled back, because analyses cannot be deleted."""
+    from cve_triage.db import PostgresStore
+    from test_checkpoint_b import FakeAssessor, embed
+
+    store = PostgresStore(DSN)
+    inv = Inventory.load(fx.INVENTORY)
+    try:
+        with store.conn.transaction(force_rollback=True):
+            w = dict(start_override="2020-01-01T00:00:00", end_override="2020-01-08T00:00:00")
+            s1 = triage.run(store, inv, pages(fx.ALL), assessor=FakeAssessor(), embedder=embed,
+                            settings={"price_in": 1.0, "price_out": 5.0}, **w)
+            assert s1["stored_analyses"] == 5
+            with store.conn.cursor() as cur:
+                cur.execute("SELECT count(*), count(embedding), bool_and(guard_result = 'passed') "
+                            "FROM cve.analyses WHERE run_id = %s", (s1["run_id"],))
+                assert cur.fetchone() == (5, 5, True)
+                cur.execute("SELECT cost_usd::float FROM cve.runs WHERE id = %s", (s1["run_id"],))
+                assert cur.fetchone()[0] == 0.0075
+                cur.execute("SELECT markdown FROM cve.digests WHERE run_id = %s", (s1["run_id"],))
+                assert "## P1 · 3" in cur.fetchone()[0]
+            fp = store.latest_fingerprints([("CVE-2026-1002", "pay-gw-01")])
+            assert fp == {("CVE-2026-1002", "pay-gw-01"): {"result": "affected", "cvss": 9.8, "kev": "2026-11-19"}}
+            recalled = store.recall(embed(["x"])[0], 3, exclude_run_id=-1)
+            assert len(recalled) == 3 and {"cve_id", "similarity"} <= set(recalled[0])
+
+            # append-only: the trigger blocks UPDATE/DELETE even for the owner; cve_agent lacks the grant
+            for sql in ("UPDATE cve.analyses SET final_priority = 'P4' WHERE run_id = %s",
+                        "DELETE FROM cve.analyses WHERE run_id = %s"):
+                with pytest.raises(Exception, match="append-only|permission denied"):
+                    with store.conn.transaction(), store.conn.cursor() as cur:
+                        cur.execute(sql, (s1["run_id"],))
+
+            # next window, same data: nothing is re-assessed
+            s2 = triage.run(store, inv, pages(fx.ALL), assessor=FakeAssessor(), embedder=embed,
+                            start_override="2020-01-08T00:00:00", end_override="2020-01-09T00:00:00")
+            assert s2["assessment"]["unchanged"] == 5 and s2["stored_analyses"] == 0
+    finally:
+        store.close()

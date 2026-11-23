@@ -21,7 +21,22 @@ class Store(Protocol):
     def save_matches(self, run_id: int, matches: list[MatchResult]) -> int: ...
     def finish_run(self, run_id: int, *, status: str, cves_fetched: int | None = None,
                    matches_found: int | None = None, langsmith_trace: str | None = None,
-                   error: str | None = None) -> None: ...
+                   error: str | None = None, cost_usd: float | None = None) -> None: ...
+    # checkpoint B
+    def latest_fingerprints(self, keys: list[tuple[str, str]]) -> dict[tuple[str, str], dict[str, Any]]: ...
+    def recall(self, embedding: list[float], k: int, exclude_run_id: int) -> list[dict[str, Any]]: ...
+    def save_analyses(self, rows: list[dict[str, Any]]) -> int: ...
+    def save_digest(self, run_id: int, markdown: str) -> None: ...
+
+
+def _vec(v: list[float] | None) -> str | None:
+    """pgvector text literal; avoids a client-side pgvector dependency."""
+    return None if v is None else "[" + ",".join(f"{x:.7g}" for x in v) + "]"
+
+
+ANALYSIS_COLUMNS = ("run_id", "cve_id", "host_id", "rule_priority", "final_priority", "rationale",
+                    "recommended_action", "evidence", "guard_result", "needs_review", "model",
+                    "prompt_version", "langsmith_run_id", "embedding")
 
 
 class PostgresStore:
@@ -112,7 +127,7 @@ class PostgresStore:
 
     def finish_run(self, run_id: int, *, status: str, cves_fetched: int | None = None,
                    matches_found: int | None = None, langsmith_trace: str | None = None,
-                   error: str | None = None) -> None:
+                   error: str | None = None, cost_usd: float | None = None) -> None:
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.execute(
                 """
@@ -120,11 +135,65 @@ class PostgresStore:
                     cves_fetched = COALESCE(%s, cves_fetched),
                     matches_found = COALESCE(%s, matches_found),
                     langsmith_trace = COALESCE(%s, langsmith_trace),
+                    cost_usd = COALESCE(%s, cost_usd),
                     error = %s
                 WHERE id = %s
                 """,
-                (status, cves_fetched, matches_found, langsmith_trace, error, run_id),
+                (status, cves_fetched, matches_found, langsmith_trace, cost_usd, error, run_id),
             )
+
+    def latest_fingerprints(self, keys):
+        """Fingerprint of the newest analysis per (cve_id, host_id)."""
+        if not keys:
+            return {}
+        with self.conn.transaction(), self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT ON (a.cve_id, a.host_id) a.cve_id, a.host_id, a.evidence->'fingerprint'
+                FROM cve.analyses a
+                JOIN unnest(%s::text[], %s::text[]) AS k(cve_id, host_id)
+                  ON a.cve_id = k.cve_id AND a.host_id = k.host_id
+                ORDER BY a.cve_id, a.host_id, a.created_at DESC, a.id DESC
+                """,
+                ([c for c, _ in keys], [h for _, h in keys]),
+            )
+            return {(c, h): fp for c, h, fp in cur.fetchall()}
+
+    def recall(self, embedding, k, exclude_run_id):
+        with self.conn.transaction(), self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT cve_id, host_id, final_priority, rule_priority, guard_result,
+                       left(rationale, 400), created_at::date::text,
+                       round((1 - (embedding <=> %s::vector))::numeric, 3)::float
+                FROM cve.analyses
+                WHERE embedding IS NOT NULL AND run_id <> %s
+                ORDER BY embedding <=> %s::vector
+                LIMIT %s
+                """,
+                (_vec(embedding), exclude_run_id, _vec(embedding), k),
+            )
+            cols = ("cve_id", "host_id", "final_priority", "rule_priority", "guard_result",
+                    "rationale", "date", "similarity")
+            return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    def save_analyses(self, rows):
+        from psycopg.types.json import Jsonb
+
+        if not rows:
+            return 0
+        placeholders = ", ".join("%s::vector" if c == "embedding" else "%s" for c in ANALYSIS_COLUMNS)
+        with self.conn.transaction(), self.conn.cursor() as cur:
+            cur.executemany(
+                f"INSERT INTO cve.analyses ({', '.join(ANALYSIS_COLUMNS)}) VALUES ({placeholders})",
+                [tuple(Jsonb(r[c]) if c == "evidence" else _vec(r[c]) if c == "embedding" else r[c]
+                       for c in ANALYSIS_COLUMNS) for r in rows],
+            )
+        return len(rows)
+
+    def save_digest(self, run_id, markdown):
+        with self.conn.transaction(), self.conn.cursor() as cur:
+            cur.execute("INSERT INTO cve.digests (run_id, markdown) VALUES (%s, %s)", (run_id, markdown))
 
 
 class MemoryStore:
@@ -135,6 +204,8 @@ class MemoryStore:
         self.runs: dict[int, dict[str, Any]] = {}
         self.cves: dict[str, tuple[NormalizedCve, dict[str, Any]]] = {}
         self.matches: list[tuple[int, MatchResult]] = []
+        self.analyses: list[dict[str, Any]] = []
+        self.digests: dict[int, str] = {}
 
     def last_ok_window_end(self) -> datetime | None:
         ends = [r["window_end"] for r in self.runs.values() if r["status"] == "ok"]
@@ -155,6 +226,34 @@ class MemoryStore:
         return len(matches)
 
     def finish_run(self, run_id, *, status, cves_fetched=None, matches_found=None,
-                   langsmith_trace=None, error=None):
-        self.runs[run_id].update(status=status, cves_fetched=cves_fetched,
-                                 matches_found=matches_found, langsmith_trace=langsmith_trace, error=error)
+                   langsmith_trace=None, error=None, cost_usd=None):
+        self.runs[run_id].update(status=status, cves_fetched=cves_fetched, matches_found=matches_found,
+                                 langsmith_trace=langsmith_trace, error=error, cost_usd=cost_usd)
+
+    def latest_fingerprints(self, keys):
+        wanted, out = set(keys), {}
+        for a in self.analyses:  # insertion order = time order
+            k = (a["cve_id"], a["host_id"])
+            if k in wanted:
+                out[k] = a["evidence"]["fingerprint"]
+        return out
+
+    def recall(self, embedding, k, exclude_run_id):
+        def cos(a, b):
+            num = sum(x * y for x, y in zip(a, b))
+            den = (sum(x * x for x in a) ** 0.5) * (sum(y * y for y in b) ** 0.5)
+            return num / den if den else 0.0
+
+        scored = [(cos(embedding, a["embedding"]), a) for a in self.analyses
+                  if a["embedding"] is not None and a["run_id"] != exclude_run_id]
+        scored.sort(key=lambda t: -t[0])
+        return [{"cve_id": a["cve_id"], "host_id": a["host_id"], "final_priority": a["final_priority"],
+                 "rule_priority": a["rule_priority"], "guard_result": a["guard_result"],
+                 "rationale": a["rationale"][:400], "similarity": round(sim, 3)} for sim, a in scored[:k]]
+
+    def save_analyses(self, rows):
+        self.analyses.extend(dict(r) for r in rows)
+        return len(rows)
+
+    def save_digest(self, run_id, markdown):
+        self.digests[run_id] = markdown

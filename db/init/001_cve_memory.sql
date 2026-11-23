@@ -90,3 +90,13 @@ DROP TRIGGER IF EXISTS analyses_append_only ON cve.analyses;
 CREATE TRIGGER analyses_append_only
     BEFORE UPDATE OR DELETE ON cve.analyses
     FOR EACH ROW EXECUTE FUNCTION cve.block_mutation();
+
+-- One markdown digest per run (checkpoint B); delivery reads from here (Q-2.1-05).
+CREATE TABLE IF NOT EXISTS cve.digests (
+    id              bigserial PRIMARY KEY,
+    run_id          bigint NOT NULL REFERENCES cve.runs(id),
+    markdown        text NOT NULL,
+    delivered_at    timestamptz,
+    created_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS digests_run_idx ON cve.digests (run_id);
