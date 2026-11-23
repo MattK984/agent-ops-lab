@@ -68,3 +68,9 @@ def test_rejections_keep_rule_priority_and_flag_review(o, why):
 def test_recalled_cve_ids_may_be_mentioned():
     r = g(out(rationale="Consistent with CVE-2025-0001 last month."), allowed_cve_ids={"CVE-2025-0001"})
     assert r.result == PASSED
+
+
+def test_rule_reason_names_the_real_exposure():
+    assert "critical internal host" in rule_priority(7.8, False, "internal", "critical")[1]
+    assert "internet-facing host" in rule_priority(7.8, False, "dmz", "critical")[1]
+    assert "exposed" not in rule_priority(7.8, False, "internal", "critical")[1]

@@ -24,7 +24,7 @@ from cve_triage.matcher import AFFECTED, Inventory, MatchResult, parse_cpe
 from cve_triage.normalize import NormalizedCve
 from cve_triage.priority import level, rule_priority
 
-PROMPT_VERSION = "assess-v1"
+PROMPT_VERSION = "assess-v2"  # v2: rule_reason no longer calls critical internal hosts "exposed"
 LLM, RULE_ONLY, CAP = "llm", "rule-only", "cap"
 HOST_FIELDS = ("role", "zone", "criticality", "data_class", "owner", "compensating_controls", "patch_window")
 

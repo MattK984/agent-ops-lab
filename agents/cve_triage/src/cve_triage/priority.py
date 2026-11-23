@@ -35,18 +35,21 @@ def level(p: str) -> int:
 
 def rule_priority(cvss: float | None, kev: bool, zone: str | None,
                   criticality: str | None) -> tuple[str, str]:
-    exposed = (zone or "") in EXPOSED_ZONES or (criticality or "") == "critical"
+    internet = (zone or "") in EXPOSED_ZONES
+    exposed = internet or (criticality or "") == "critical"
+    # Say WHY the host counts, so the model is not told an internal host is internet-facing
+    why_host = ("internet-facing host" if internet else "critical internal host") if exposed else "host"
     where = f"zone={zone}, criticality={criticality}"
     if kev:
         return "P1", "CVE is in CISA KEV (known exploited)"
     if cvss is None:
         return "P3", "no CVSS score yet; unknown is not treated as low"
     if cvss >= 9.0 and exposed:
-        return "P1", f"CVSS {cvss} >= 9.0 on an exposed host ({where})"
+        return "P1", f"CVSS {cvss} >= 9.0 on a {why_host} ({where})"
     if cvss >= 7.0 and exposed:
-        return "P2", f"CVSS {cvss} >= 7.0 on an exposed host ({where})"
+        return "P2", f"CVSS {cvss} >= 7.0 on a {why_host} ({where})"
     if cvss >= 9.0:
-        return "P2", f"CVSS {cvss} >= 9.0 on a non-exposed host ({where})"
+        return "P2", f"CVSS {cvss} >= 9.0 on a non-critical internal host ({where})"
     if cvss >= 4.0:
         return "P3", f"CVSS {cvss} >= 4.0"
     return "P4", f"CVSS {cvss} < 4.0"
