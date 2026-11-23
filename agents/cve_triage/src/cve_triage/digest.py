@@ -84,11 +84,24 @@ def render(summary: dict[str, Any], analyses: list[dict[str, Any]]) -> str:
         if not rows:
             lines.append("None.")
             continue
-        lines += ["", "| Host | CVE | CVSS | | Action | Check |", "|---|---|---|---|---|---|"]
-        for a in rows:
+        assessed = [a for a in rows if a["route"] == "llm"]
+        floor_only = [a for a in rows if a["route"] != "llm"]
+        if assessed:
+            lines += ["", "| Host | CVE | CVSS | | Action | Check |", "|---|---|---|---|---|---|"]
+        if floor_only:
+            counts = Counter((a["host_id"], a["route"]) for a in floor_only)
+            label = {"cap": "deferred over cap", "rule-only": "rule only"}
+            note = " · ".join(f"{h} {label.get(r, r)}: {n}" for (h, r), n in sorted(counts.items()))
+            kev = [a["cve_id"] for a in floor_only if a.get("kev")]
+            lines_after = [f"", f"Rule priority only, no model assessment ({len(floor_only)}): {note}"
+                           + (f" · KEV among them: {', '.join(kev)}" if kev else "")]
+        else:
+            lines_after = []
+        for a in assessed:
             lines.append(f"| {a['host_id']} | [{a['cve_id']}](https://nvd.nist.gov/vuln/detail/{a['cve_id']}) | "
                          f"{a.get('cvss') if a.get('cvss') is not None else '–'} | {_kev(a)} | "
                          f"{_cell(a.get('recommended_action'))} | {_guard(a)} |")
+        lines += lines_after
 
     low = [a for p in ("P3", "P4") for a in by_prio.get(p, [])]
     if low:
@@ -102,9 +115,15 @@ def render(summary: dict[str, Any], analyses: list[dict[str, Any]]) -> str:
 
     flagged = [a for a in analyses if a["needs_review"]]
     if flagged:
+        deferred = [a for a in flagged if a["route"] == "cap"]
+        other = [a for a in flagged if a["route"] != "cap"]
         lines += ["", f"## Needs human review · {len(flagged)}", ""]
-        for a in flagged[:20]:
+        for a in other[:20]:
             lines.append(f"- {a['host_id']} {a['cve_id']} {a['final_priority']}: {_cell(a.get('guard_reason'), 200)}")
+        if deferred:
+            per_host = Counter(a["host_id"] for a in deferred)
+            lines.append(f"- {len(deferred)} deferred over the model cap, assessed when they reappear: "
+                         + " · ".join(f"{h} {n}" for h, n in sorted(per_host.items())))
 
     lines += ["", f"_Trace: LangSmith run `{s.get('langsmith_run_id', '')}` · prompt {s.get('prompt_version', '')}"
                   f" · model {s.get('model', '')}_"]

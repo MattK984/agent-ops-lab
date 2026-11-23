@@ -122,7 +122,10 @@ def test_cap_keeps_most_urgent_for_the_model(inv):
     by_route = {a["evidence"]["route"]: a for a in store.analyses}
     assert all(a["rule_priority"] == "P1" for a in store.analyses if a["evidence"]["route"] == "llm")
     assert by_route["cap"]["needs_review"] and by_route["cap"]["model"] == "rule-only"
-    assert "Needs human review · 3" in store.digests[1]
+    md = store.digests[1]
+    assert "Needs human review · 3" in md and "3 deferred over the model cap" in md
+    assert "Rule priority only, no model assessment" in md
+    assert md.count("rule-only (over cap)") == 0          # deferred rows are counted, not listed
 
 
 def test_guard_corrects_and_rejects_inside_the_graph(inv):
