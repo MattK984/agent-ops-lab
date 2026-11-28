@@ -1,0 +1,18 @@
+# One agent-ops job; the instance name is the job (see ops/run-job.sh allow-list).
+# Rendered by ops/install-timers.sh (@REPO_DIR@, @RUN_USER@).
+[Unit]
+Description=agent-ops job %i
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@RUN_USER@
+WorkingDirectory=@REPO_DIR@
+ExecStart=@REPO_DIR@/ops/run-job.sh %i
+# A daily run takes ~1-2 min; a Patch-Tuesday week is the worst case.
+TimeoutStartSec=45min
+# Be the polite neighbour of the MA50 paper book on the same VPS.
+Nice=10
+SyslogIdentifier=agent-ops-job
